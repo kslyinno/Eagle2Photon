@@ -1,0 +1,492 @@
+#usage "<b>Encapsulated PostScript output</b>\n"
+       "<p>This program creates a Encapsulated Postscript file from "
+       "a board or a sheet. Program is based on <b>psdraw4.ulp</b> "
+       "and adds drawing polygons and other shapes of pads. Many "
+       "postscript operators were redefined to make file smaller.</p>\n"
+       "<p>Mirror and/or upside-down operation of image can be done by "
+       "uncommenting lines marked by <b>%MIRROR</b> and/or <b>%UPSIDE DOWN</b> "
+       "resp. at the end.</p>\n"
+       "<p>Run RATSNEST to calculate polygons before exporting!</p>\n"
+       "<p>Tested on EAGLE v4.03.</p>\n"
+       "<author>Author: Filip Kinovic, kinovicf@centrum.cz, 9.5.2004, v1.0</author>"
+
+int i, LayerActive[];
+string fileName, ttext;
+
+void PSopen(string title, int L, int B, int R, int T, real scale)
+{
+  int xoffset = 30, yoffset = 30, bboffset = 3;
+
+  printf("%%!PS-Adobe-3.0 EPSF-3.0\n"
+         "%%%%Creator: EAGLE v%d.%02d\n"
+         "%%%%Title: %s\n"
+         "%%%%CreationDate: %s\n"
+         "%%%%Pages: 0\n"
+         "%%%%LanguageLevel: 2\n"
+         "%%%%BoundingBox: %d %d %d %d\n"
+         "%%%%EndComments\n"
+         "\n",
+         EAGLE_VERSION, EAGLE_RELEASE,
+         title,
+         t2string(time()),
+         xoffset - bboffset,
+         yoffset - bboffset,
+         int((R - L) * u2inch(72) * scale) + xoffset + bboffset,
+         int((T - B) * u2inch(72) * scale) + yoffset + bboffset);
+
+  printf("%%%%BeginProlog\n"
+         "%%redefination of operators\n"
+         "/d /def load def\n"
+         "/, /load load d\n"
+         "/bd {bind d} bind d\n"
+         "/ld {, d} bd\n"
+         "/~ /exch ld\n"
+         "/! /pop ld\n"
+         "/@ /dup ld\n"
+         "/V /div ld\n"
+         "/: /gsave ld\n"
+         "/; /grestore ld\n"
+         "/` /begin ld\n"
+         "/E /end ld\n"
+         "/+ /translate ld\n"
+         "/+S /scale ld\n"
+         "/R /rotate ld\n"
+         "/N /newpath ld\n"
+         "/C /closepath ld\n"
+         "/K /stroke ld\n"
+         "/L /fill ld\n"
+         "/O /eofill ld\n"
+         "/S /show ld\n"
+         "/LH /showpage ld\n"
+         "/M /moveto ld\n"
+         "/I /lineto ld\n"
+         "/-M /rlineto ld\n"
+         "/-c /curveto ld\n"
+         "/Ac /arc ld\n"
+         "/Lw /setlinewidth ld\n"
+         "/Lc /setlinecap ld\n"
+         "/Lj /setlinejoin ld\n"
+         "/sd /setdash ld\n"
+         "/sg /setgray ld\n"
+         "/sr /setrgbcolor ld\n"
+         "/Ji /setfont ld\n"
+         "/FS {findfont ~ scalefont} bd\n"
+         "%%%%EndProlog\n"
+         "\n"
+         "%%%%Page: 1 1\n");
+
+  printf(":\n"
+         "%d %d +\n"
+         "1 Lc 1 Lj\n"
+         "%%%d %d + %%MIRROR\n"
+         "%%%d %d + %%UPSIDE DOWN\n"
+         "%10.8f %10.8f +S %%normal\n"
+         "%%%3.1f %3.1f +S %%MIRROR\n"
+         "%%%3.1f %3.1f +S %%UPSIDE DOWN\n"
+         "%d %d +\n\n",
+         xoffset, yoffset,
+         int((R - L) * u2inch(72) * scale), 0,
+         0, int((T - B) * u2inch(72) * scale),
+         scale * u2inch(72), scale * u2inch(72),
+         -1.0, 1.0,
+         1.0, -1.0,
+         -L, -B);
+}
+
+void PSclose(void)
+{
+  printf("LH\n");
+  printf(";\n");
+
+  printf("\n%%%%EOF");
+}
+
+void DrawArc(UL_ARC A)
+{
+  if (LayerActive[A.layer])
+     printf("N %d %d %d %f %f Ac %d Lw K\n",
+            A.xc, A.yc, A.radius, A.angle1, A.angle2, A.width);
+}
+
+void DrawCircle(UL_CIRCLE C)
+{
+  if (LayerActive[C.layer])
+     printf("N %d %d %d 0 360 Ac %d Lw K\n",
+            C.x, C.y, C.radius, C.width);
+}
+
+void DrawPiece(UL_WIRE W)
+{
+  if (LayerActive[W.layer])
+     printf("N %d %d M %d %d I %d Lw K\n",
+          W.x1, W.y1, W.x2, W.y2, W.width);
+}
+
+void DrawWire(UL_WIRE W)
+{
+  if (LayerActive[W.layer]) {
+    if (W.style == WIRE_STYLE_CONTINUOUS) {
+     printf("N %d %d M %d %d I %d Lw K\n",
+          W.x1, W.y1, W.x2, W.y2, W.width);
+    }
+    else {
+      W.pieces(WP) DrawPiece(WP);
+    }
+  }
+}
+
+//*** draw via
+void DrawVia(UL_VIA V)
+{
+  if (LayerActive[LAYER_VIAS]) {
+    //via shape
+    int r = V.diameter[LAYER_TOP] / 2;
+    switch(V.shape[LAYER_TOP]) {
+      case VIA_SHAPE_SQUARE:
+        printf("N %d %d M %d %d -M %d %d -M %d %d -M C L\n",
+               V.x - r, V.y - r,
+               r + r, 0,
+               0, r + r,
+               -(r + r), 0);
+        break;
+      case VIA_SHAPE_ROUND:
+        printf("N %d %d M %d %d %d 0 360 Ac C L\n",
+               V.x + r, V.y, V.x, V.y, r);
+        break;
+      case VIA_SHAPE_OCTAGON:
+        int dr = int(r * sin(PI / 8.0));
+        printf("N %d %d M %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I C L\n",
+               V.x + r, V.y + dr,
+               V.x + dr, V.y + r,
+               V.x - dr, V.y + r,
+               V.x - r, V.y + dr,
+               V.x - r, V.y - dr,
+               V.x - dr, V.y - r,
+               V.x + dr, V.y - r,
+               V.x + r, V.y - dr);
+        break;
+    }
+    //via drill
+    printf("N %d %d M %d %d %d 0 360 Ac C : 1 sg L ;\n",
+           V.x + V.drill / 2, V.y, V.x, V.y, V.drill / 2);
+  }
+  //pad drill symbol
+  if (LayerActive[LAYER_DRILLS]) {
+//  if (H.drillsymbol) {
+    printf("N %d %d %d 0 360 Ac %d Lw K\n",
+           V.x, V.y, V.drill/2, 1000);
+    printf("N %d %d M %d %d I %d Lw K\n",
+           V.x - V.drill/2, V.y - V.drill/2,
+           V.x + V.drill/2, V.y + V.drill/2,
+           1000);
+//  }
+  }
+}
+
+void DrawContact(UL_CONTACT C)
+{
+  if (C.pad) {
+    if (LayerActive[LAYER_PADS]) {
+      //pad shape
+      int r = C.pad.diameter[LAYER_TOP] / 2;
+      int dr = int(r * sin(PI / 8.0));
+      switch(C.pad.shape[LAYER_TOP]) {
+        case VIA_SHAPE_SQUARE:
+          printf("N %d %d M %d %d -M %d %d -M %d %d -M C L\n",
+                 C.x - r, C.y - r,
+                 r + r, 0,
+                 0, r + r,
+                 -(r + r), 0);
+          break;
+        case VIA_SHAPE_ROUND:
+          printf("N %d %d M %d %d %d 0 360 Ac C L\n",
+                 C.x + r, C.y, C.x, C.y, r);
+          break;
+        case VIA_SHAPE_OCTAGON:
+          printf("N %d %d M %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I C L\n",
+                 C.x + r, C.y + dr,
+                 C.x + dr, C.y + r,
+                 C.x - dr, C.y + r,
+                 C.x - r, C.y + dr,
+                 C.x - r, C.y - dr,
+                 C.x - dr, C.y - r,
+                 C.x + dr, C.y - r,
+                 C.x + r, C.y - dr);
+          break;
+/*        case PAD_SHAPE_XLONGOCT:
+          printf("N %d %d M %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I C L\n",
+                 C.x + r + r, C.y + dr,
+                 C.x + dr + r, C.y + r,
+                 C.x - dr - r, C.y + r,
+                 C.x - r - r, C.y + dr,
+                 C.x - r - r, C.y - dr,
+                 C.x - dr - r, C.y - r,
+                 C.x + dr + r, C.y - r,
+                 C.x + r + r, C.y - dr);
+          break;*/
+//        case PAD_SHAPE_YLONGOCT:
+          printf("N %d %d M %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I %d %d I C L\n",
+                 C.x + r, C.y + dr + r,
+                 C.x + dr, C.y + r + r,
+                 C.x - dr, C.y + r + r,
+                 C.x - r, C.y + dr + r,
+                 C.x - r, C.y - dr - r,
+                 C.x - dr, C.y - r - r,
+                 C.x + dr, C.y - r - r,
+                 C.x + r, C.y - dr - r);
+          break;
+      }
+      //pad drill
+      printf("N %d %d M %d %d %d 0 360 Ac C : 1 sg L ;\n",
+                 C.pad.x + C.pad.drill / 2, C.pad.y, C.pad.x, C.pad.y, C.pad.drill / 2);
+    }
+    //pad drill symbol
+    if (LayerActive[LAYER_DRILLS]) {
+//    if (H.drillsymbol) {
+      printf("N %d %d %d 0 360 Ac %d Lw K\n",
+             C.pad.x, C.pad.y, C.pad.drill/2, 1000);
+      printf("N %d %d M %d %d I %d Lw K\n",
+             C.pad.x - C.pad.drill/2, C.pad.y - C.pad.drill/2,
+             C.pad.x + C.pad.drill/2, C.pad.y + C.pad.drill/2,
+             1000);
+//    }
+    }
+  }
+  else if (C.smd) {
+     if (LayerActive[C.smd.layer]) {
+        int dx2 = C.smd.dx / 2;
+        int dy2 = C.smd.dy / 2;
+        printf("N %d %d M %d %d I %d %d I %d %d I C L\n",
+              C.x - dx2, C.y - dy2,
+              C.x - dx2, C.y + dy2,
+              C.x + dx2, C.y + dy2,
+              C.x + dx2, C.y - dy2);
+        }
+     }
+}
+
+void DrawJunction(UL_JUNCTION J)
+{
+  if (LayerActive[LAYER_NETS])
+     printf("N %d %d M %d %d %d 0 360 Ac C L\n",
+            J.x + J.diameter / 2, J.y, J.x, J.y, J.diameter / 2);
+}
+
+void DrawVecText(UL_TEXT T)
+{
+  if (LayerActive[T.layer])
+    T.wires(W) DrawWire(W);
+}
+
+void DrawText(UL_TEXT T)
+{
+  if (LayerActive[T.layer]) {
+    if (T.font == FONT_VECTOR)
+      T.wires(W) DrawWire(W);
+    else {
+      printf("%d /%s FS Ji %d %d M : %s",
+             int(1.2 * T.size),   //bigger font
+             T.font == FONT_PROPORTIONAL ? "Helvetica" : "Courier",
+             T.x, T.y, T.mirror ? "-1 1 +S " : "");
+      if (T.angle >= 45.0 && T.angle < 135.0) {   //R90
+        printf("%f R (%s) S ;\n", T.angle, T.value);
+      }
+      else if (T.angle >= 135.0 && T.angle < 225.0) {   //R180
+        printf("(%s) @ stringwidth ! neg -%d -M S ;\n",
+               T.value, int(0.8 * T.size));
+      }
+      else if (T.angle >= 225.0 && T.angle < 315.0) {   //R270
+        printf("%f R (%s) @ stringwidth ! neg -%d -M S ;\n",
+               T.angle - 180.0, T.value, int(0.8 * T.size));
+      }
+      else {
+        printf("(%s) S ;\n", T.value);
+      }
+    }
+  }
+}
+
+void DrawRectangle(UL_RECTANGLE R)
+{
+  if (LayerActive[R.layer]) {
+     printf("N %d %d M %d %d I %d %d I %d %d I C L\n",
+           R.x1, R.y1, R.x2, R.y1, R.x2, R.y2, R.x1, R.y2);
+     }
+}
+
+void DrawPolygon(UL_POLYGON P)
+{
+  if (LayerActive[P.layer]) {
+    int x0, y0, first;
+    real vector;
+
+    //user polygon
+//    P.wires(PW) DrawWire(PW);
+    //fill polygon
+    first = 1;
+    P.contours(PCW) {
+      if (first) {    //a new partial polygon is starting
+        vector = 0.0;
+        x0 = PCW.x1;
+        y0 = PCW.y1;
+        printf("N %d %d M %d %d I ", PCW.x1, PCW.y1, PCW.x2, PCW.y2);
+      }
+      //
+      printf("%d %d I ", PCW.x2, PCW.y2);
+
+      if (first)
+        first = 0;
+      else if (PCW.x2 == x0 && PCW.y2 == y0) {    // this was the last wire of the partial polygon
+        first = 1;
+        if (vector <= 0.0) {    //if positive polygon (right rotation)
+          printf("C %s%d Lw K\n",
+                 P.pour == POLYGON_POUR_SOLID ? ": L ; " : "", P.width);   //fill in & draw contour
+//          printf("C : %d Lw 1 0 0 sr K ;\n", P.width);   //draw red contour
+        }
+        else {    //negative poligon (left rotation)
+          printf("C %s%d Lw K\n",
+                 P.pour == POLYGON_POUR_SOLID ? ": 1 sg L ; " : "", P.width);   //fill in & draw contour
+//          printf("C : %d Lw 0 1 0 sr K ;\n", P.width);   //draw green contour
+        }
+      }
+      else {
+        vector += real(PCW.x1-x0) * real(PCW.y2-PCW.y1) - real(PCW.y1-y0) * real(PCW.x2-PCW.x1);    //add vector mul.
+      }
+    }
+    if (P.pour == POLYGON_POUR_HATCH)
+      P.fillings(PFW) DrawWire(PFW);
+
+  }
+}
+
+void DrawHole(UL_HOLE H)
+{
+  if (LayerActive[LAYER_DIMENSION]) {
+     printf("N %d %d %d 0 360 Ac %d Lw K\n",
+            H.x, H.y, H.drill/2, 1000);
+  }
+  if (LayerActive[LAYER_HOLES]) {
+//    if (H.drillsymbol) {
+       printf("N %d %d %d 0 360 Ac %d Lw K\n",
+              H.x, H.y, H.drill/2, 1000);
+       printf("N %d %d M %d %d I %d Lw K\n",
+              H.x - H.drill/2, H.y - H.drill/2,
+              H.x + H.drill/2, H.y + H.drill/2,
+              1000);
+       printf("N %d %d M %d %d I %d Lw K\n",
+              H.x + H.drill/2, H.y - H.drill/2,
+              H.x - H.drill/2, H.y + H.drill/2,
+              1000);
+//    }
+  }
+
+}
+
+void DrawPin(UL_PIN P)
+{
+  P.circles(X) DrawCircle(X);
+  P.wires(X)   DrawWire(X);
+  P.texts(X)   DrawVecText(X);
+}
+
+void DrawSymbol(UL_SYMBOL S)
+{
+  S.circles(C)    DrawCircle(C);
+  S.polygons(P) DrawPolygon(P);
+  S.rectangles(R) DrawRectangle(R);
+  S.wires(W)      DrawWire(W);
+  S.pins(P)       DrawPin(P);
+  S.texts(T)      DrawVecText(T);
+}
+
+void DrawPackage(UL_PACKAGE P)
+{
+  P.contacts(C)   DrawContact(C);
+  P.circles(CC)    DrawCircle(CC);
+  P.polygons(PP) DrawPolygon(PP);
+  P.rectangles(R) DrawRectangle(R);
+  P.wires(W)      DrawWire(W);
+  P.texts(T)      DrawText(T);
+}
+
+if (board) {
+  board(B) {
+    B.layers(L) LayerActive[L.number] = L.visible;
+
+    sprintf(ttext, "%s_brd.eps", filesetext(B.name, ""));
+    fileName = dlgFileSave("Save File", filesetext(ttext, ".eps"), "*.eps");
+    if (fileName == "")
+      exit(0);
+    output(fileName) {
+      PSopen(filename(fileName), B.area.x1, B.area.y1, B.area.x2, B.area.y2, 1.0);
+
+      B.signals(S) {
+        S.polygons(P) DrawPolygon(P);
+        S.wires(W) DrawWire(W);
+        S.vias(V)  DrawVia(V);
+      }
+      B.elements(E) {
+        E.texts(T) DrawText(T);
+        DrawPackage(E.package);
+      }
+
+      B.circles(BC) DrawCircle(BC);
+      B.holes(BH) DrawHole(BH);
+      B.polygons(BP) DrawPolygon(BP);
+      B.rectangles(BR) DrawRectangle(BR);
+      B.wires(BW) DrawWire(BW);
+      B.texts(BT) DrawText(BT);
+
+      PSclose();
+
+      sprintf(ttext, "Board exported to \"%s\".", filename(fileName));
+      dlgMessageBox(ttext);
+    }
+  }
+}
+
+if (schematic) {
+  schematic(SCH) {
+    SCH.layers(L) LayerActive[L.number] = L.visible;
+    i = 0;
+    sheet(SH) {
+      i++;
+      sprintf(ttext, "%s_sch%d.eps", filesetext(SCH.name, ""), i);
+      fileName = dlgFileSave("Save File", filesetext(ttext, ".eps"), "*.eps");
+      if (fileName == "")
+        exit(0);
+      output(fileName) {
+        PSopen(fileName, SH.area.x1, SH.area.y1, SH.area.x2, SH.area.y2, 0.5);
+
+        SH.circles(SC) DrawCircle(SC);
+        SH.polygons(SP) DrawPolygon(SP);
+        SH.rectangles(SR) DrawRectangle(SR);
+        SH.wires(SW) DrawWire(SW);
+        SH.texts(ST) DrawVecText(ST);
+
+        SH.nets(N) N.segments(S) {
+          S.wires(W) DrawWire(W);
+          S.texts(T) DrawVecText(T);
+          S.junctions(J) DrawJunction(J);
+        }
+        SH.busses(B) B.segments(S) {
+          S.wires(W) DrawWire(W);
+          S.texts(T) DrawVecText(T);
+        }
+        SH.parts(P) {
+          P.instances(I) {
+            DrawSymbol(I.gate.symbol);
+            I.texts(T) DrawVecText(T);
+          }
+        }
+
+        PSclose();
+
+        sprintf(ttext, "Shematic sheet [%d] exported to \"%s\".",
+                i, filename(fileName));
+        dlgMessageBox(ttext);
+      }
+    }
+  }
+}
+
